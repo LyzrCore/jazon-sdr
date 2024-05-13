@@ -10,6 +10,7 @@ from lyzr_automata.tasks.task_literals import InputType, OutputType
 from lyzr_automata.tools.prebuilt_tools import send_email_by_smtp_tool
 from duckduckgo_search import AsyncDDGS
 
+
 class JaWorker:
     def __init__(
         self,
@@ -18,6 +19,10 @@ class JaWorker:
         company_product_data_fp,
         previous_sales_data_fp,
         mailer,
+        draft_mail_agent_prompt,
+        sales_agent_prompt,
+        first_email_task_prompt,
+        reply_email_task_prompt,
     ):
         self.open_ai_key = open_ai_key
         self.perplexity_api_key = perplexity_api_key
@@ -25,6 +30,10 @@ class JaWorker:
         self.previous_sales_data_fp = previous_sales_data_fp
         self.logs = []
         self.mailer = mailer
+        self.draft_mail_agent_prompt = draft_mail_agent_prompt
+        self.sales_expert_agent_prompt = sales_agent_prompt
+        self.first_email_task_prompt = first_email_task_prompt
+        self.reply_email_task_prompt = reply_email_task_prompt
 
     def init(self):
 
@@ -71,7 +80,7 @@ class JaWorker:
         research = await self.research_task(email=prospect_email)
         self.first_email = self.email_composer(
             input=f" PROSPECT_INFO : {research}",
-            instructions="create a email selling the product/service based on the pdf file provided during creation of assistant. Use the Client/ Prospect information provided (to whom you are selling) as PROSPECT_INFO:  to make the customized mail [IMPORTANT!] use html dont use css make it look fully human written. Send only EMAIL nothing extra",
+            instructions=self.first_email_task_prompt,
         )
         first_email_rp = self.send_mail_task(input=self.first_email)
         self.subject = first_email_rp["subject"]
@@ -97,12 +106,12 @@ class JaWorker:
 
     def create_agents(self):
         self.email_composer_agent = Agent(
-            prompt_persona="you are a expert research draft email creator who is pervasive and will do anything to sell",
+            prompt_persona=self.draft_mail_agent_prompt,
             role="Draft Email Expert",
             memory=self.company_product_memory,
         )
         self.sales_expert_agent = Agent(
-            prompt_persona="you are a sales head manager who is good at recreating emails according to company's sales email history provided in the file, and you only return directly sendable email",
+            prompt_persona=self.sales_expert_agent_prompt,
             role="Sales Head Manager",
             memory=self.previous_sales_conversation_memory,
         )
@@ -118,7 +127,10 @@ class JaWorker:
         info = email.split("@")
         name = info[0]
         domain = info[1]
-        ddg_results = await self.search_website(domain)
+        try:
+            ddg_results = await self.search_website(domain)
+        except:
+            ddg_results = ""
         self.logs.append("I am searching about our prospect on internet")
 
         pp_search = Task(
@@ -181,6 +193,7 @@ class JaWorker:
     def auto_reply(self, subject):
         SUBJECT = subject
         CHECK_INTERVAL = 60
+        MAX_TIMES = 5
         mail = self.mailer
 
         self.previous_message = self.first_email
@@ -197,7 +210,7 @@ class JaWorker:
             self.logs.append("Crafting a email based on our sales call history")
             response_email = self.email_composer(
                 input=f"previous_email:{self.previous_message} current_email:{current_message}",
-                instructions="based on the email response by user and previous email sent. send a response email adapting to the email. Use HTML but make it look like human written email make sure its well formatted. Use the conversions text file to draft it accordingly. **IMPORTANT** Only send the email no additional text",
+                instructions=self.reply_email_task_prompt,
             )
             self.logs.append("Sending an reply to the prospect")
             Task(
@@ -221,7 +234,9 @@ class JaWorker:
         replied_ids = set()
         auto_log_sent = True
         i = 1
-        while True:
+        runs = 1
+        while runs < MAX_TIMES:
+            runs = runs + 1
             if auto_log_sent:
                 self.logs.append(
                     f"I am listening to incoming mails from prospect (${i})"
