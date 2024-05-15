@@ -18,7 +18,3 @@ settings_config = {
     "previous_sales_data_fp": os.getenv("PREVIOUS_SALES_DATA_FP"),
 }
 settings = Settings(**settings_config)
-
-imap_service = create_imap_service(
-    settings.imap_server, settings.email, settings.password
-)

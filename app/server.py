@@ -9,6 +9,7 @@ from typing import Dict, Optional
 
 from app.agent import JaWorker
 from app import settings, imap_service
+from app.utils import create_imap_service
 
 
 app = FastAPI()
@@ -74,6 +75,10 @@ async def run_sales_pipeline(email: str, background_tasks: BackgroundTasks):
     if email in ja_workers:
         raise HTTPException(status_code=400, detail="Email already taken")
 
+    imap_service = create_imap_service(
+        settings.imap_server, settings.email, settings.password
+    )
+    
     sales_agent = JaWorker(
         open_ai_key=settings.open_ai_key,
         perplexity_api_key=settings.perplexity_key,

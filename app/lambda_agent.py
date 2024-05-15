@@ -2,8 +2,6 @@ from lyzr_automata.agents.agent_base import Agent
 from lyzr_automata.ai_models.openai import OpenAIModel
 from lyzr_automata.ai_models.perplexity import PerplexityModel
 from lyzr_automata.memory.open_ai import OpenAIMemory
-import email
-import time
 
 from lyzr_automata.tasks.task_base import Task
 from lyzr_automata.tasks.task_literals import InputType, OutputType
@@ -18,7 +16,6 @@ class JaWorker:
         perplexity_api_key,
         company_product_data_fp,
         previous_sales_data_fp,
-        mailer,
         draft_mail_agent_prompt,
         sales_agent_prompt,
         first_email_task_prompt,
@@ -29,7 +26,6 @@ class JaWorker:
         self.company_product_data_fp = company_product_data_fp
         self.previous_sales_data_fp = previous_sales_data_fp
         self.logs = []
-        self.mailer = mailer
         self.draft_mail_agent_prompt = draft_mail_agent_prompt
         self.sales_expert_agent_prompt = sales_agent_prompt
         self.first_email_task_prompt = first_email_task_prompt
@@ -45,31 +41,8 @@ class JaWorker:
 
         self.create_tools()
 
-    def configure_mail_service(
-        self,
-        username,
-        password,
-        port,
-        sender_email,
-        imap_server,
-        smtp_server,
-    ):
-        self.mail_sender_config = {
-            "username": username,
-            "password": password,
-            "host": smtp_server,
-            "port": port,
-            "sender_email": sender_email,
-        }
-        self.mail_receiver_config = {
-            "username": username,
-            "password": password,
-            "imap_server": imap_server,
-            "smtp_server": smtp_server,
-        }
-
     def create_tools(self):
-        self.email_sender_tool = send_email_by_smtp_tool(**self.mail_sender_config)
+        pass
 
     async def search_website(self, query):
         results = await AsyncDDGS().text(query, max_results=3)
@@ -84,7 +57,7 @@ class JaWorker:
         )
         first_email_rp = self.send_mail_task(input=self.first_email)
         self.subject = first_email_rp["subject"]
-        self.auto_reply(subject=self.subject)
+        # self.auto_reply(subject=self.subject)
 
     def create_models(self, open_ai_key, perplexity_api_key):
         self.open_ai_model_text = OpenAIModel(
@@ -190,72 +163,8 @@ class JaWorker:
         self.logs.append("First email sent")
         return response
 
-    def auto_reply(self, subject):
-        SUBJECT = subject
-        CHECK_INTERVAL = 60
-        MAX_TIMES = 5
-        mail = self.mailer
-
-        self.previous_message = self.first_email
-
-        def search_emails(subject):
-            mail.select("inbox")
-            result, data = mail.search(None, '(SUBJECT "{}")'.format(subject))
-            if result == "OK":
-                return data[0].split()
-            return []
-
-        def reply_email(to_addr, subject, message_id, current_message):
-            self.logs.append("Received email from the prospect")
-            self.logs.append("Crafting a email based on our sales call history")
-            response_email = self.email_composer(
-                input=f"previous_email:{self.previous_message} current_email:{current_message}",
-                instructions=self.reply_email_task_prompt,
-            )
-            self.logs.append("Sending an reply to the prospect")
-            Task(
-                name="Send Email Task",
-                tool=self.email_sender_tool,
-                instructions="Send Email",
-                model=self.open_ai_model_text,
-                previous_output=response_email,
-                default_input=f"$ email: {to_addr}, thread_id:${message_id} ,subject: {subject}",
-            ).execute()
-            self.logs.append("Reply sent")
-
-        def get_email_details(email_id):
-            _, data = mail.fetch(email_id, "(RFC822)")
-            raw_email = data[0][1]
-            email_message = email.message_from_bytes(raw_email)
-            from_addr = email.utils.parseaddr(email_message["From"])[1]
-            message_id = email_message["Message-ID"]
-            return from_addr, message_id, email_message
-
-        replied_ids = set()
-        auto_log_sent = True
-        i = 1
-        runs = 1
-        while runs < MAX_TIMES:
-            if runs == MAX_TIMES:
-                self.mailer.logout()
-                break
-            runs = runs + 1
-            if auto_log_sent:
-                self.logs.append(
-                    f"I am listening to incoming mails from prospect (${i})"
-                )
-                auto_log_sent = False
-            try:
-                email_ids = search_emails(SUBJECT)
-                for email_id in email_ids:
-                    if email_id in replied_ids:
-                        continue
-                    from_addr, message_id, email_message = get_email_details(email_id)
-                    reply_email(from_addr, SUBJECT, message_id, email_message)
-                    self.previous_message = email_message
-                    replied_ids.add(email_id)
-                    auto_log_sent = True
-                    i = i + 1
-            except Exception as e:
-                print(f"Error: {e}")
-            time.sleep(CHECK_INTERVAL)
+    def reply_email(self, history_email_body: str, current_email_body: str):
+        return self.email_composer(
+            input=f"previous_email:{history_email_body} current_email:{current_email_body}",
+            instructions=self.reply_email_task_prompt,
+        )
